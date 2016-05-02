@@ -1,0 +1,10 @@
+192.168.0.17	www.BOA.com
+127.0.0.1	www.fsl.com
+10.6.6.6	foo.example.com
+10.6.6.67	bar.example.com
+192.168.66.6	www.cs.stonybrook.edu
+192.168.0.18	www.BOA1.com
+127.0.0.2	www.fsl1.com
+10.6.6.7	foo.exampl1e.com
+10.6.6.77	bar.exampl1e.com
+192.168.66.7	www.cs.stonybroo1k.edu

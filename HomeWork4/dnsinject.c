@@ -6,12 +6,45 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <getopt.h>
+#include <errno.h>
+
+struct map {
+        char hostnames[100][100];
+        char ip_addrs[100][100];
+        int len;
+};
 
 void print_usage(void) {
 	printf("./dnsinject [-i interface] [-f file] expression\n");
 	printf("-i  Listen on network device <interface> (e.g., eth0).\n");
 	printf("-f  File with Ip addresses and Hostnames to be Hijacked\n");
 	printf("<expression> is a BPF filter that specifies which packets will be monitored.\n");
+}
+
+void print_something(unsigned char *args) {
+        struct map *Map1;
+        int len, j;
+
+        Map1 = (struct map*)args;
+        len = Map1->len;
+        for (j = 0; j < len; j++)
+                printf("Host Name : %s and IP : %s\n", Map1->hostnames[j], Map1->ip_addrs[j]);
+}
+
+int search_hostname(unsigned char *args, char *str) {
+        struct map *Map1;
+        int len, j;
+
+        Map1 = (struct map*)args;
+        len = Map1->len;
+        for (j = 0; j < len; j++) {
+                if (strcmp(Map1->hostnames[j], str) == 0) {
+                        printf("Found IP : %s\n", Map1->ip_addrs[j]);
+                        return j;
+                }
+        }
+        printf("No IP Found\n");
+	return -1;
 }
 
 int main(int argc, char **argv) {
@@ -25,8 +58,17 @@ int main(int argc, char **argv) {
         bpf_u_int32 mask;               /* The netmask of our sniffing device */
         bpf_u_int32 net;                /* The IP of our sniffing device */
         bool set = false;
+	struct map *Map1;
+	FILE * fp;
+	char *line = NULL, *str1 = NULL, *token = NULL;
+	char *saveptr1;
+	size_t len = 0;
+	ssize_t read;
+	int j;
+	int mapSize = 0;
 
 	opterr = 0;
+	Map1 = (struct map*)malloc(sizeof(struct map));
 	while (c = getopt(argc, argv, "hi:f:")) {
 		switch (c) {
                         case 'h' :
@@ -53,9 +95,37 @@ int main(int argc, char **argv) {
 out:
 	for (index = optind; index < argc; index++)
 		expr = argv[index];
+
 	printf("interface : %s\n", interface);
 	printf("file : %s\n", file);
 	printf("expr : %s\n", expr);
+
+	if (file) {
+		fp = fopen(file, "r");
+		if (fp == NULL) {
+                	perror("open error");
+                	return -1;
+        	}
+		while ((read = getline(&line, &len, fp)) != -1) {
+			for (j = 1, str1 = line; ; j++, str1 = NULL) {
+				token = strtok_r(str1, "\t", &saveptr1);
+				if (token == NULL)
+					break;
+				if (j == 1) {
+					strncpy(Map1->ip_addrs[mapSize], token, strlen(token));
+					Map1->ip_addrs[mapSize][strlen(token)] = '\0';
+				} else if (j == 2) {
+					strncpy(Map1->hostnames[mapSize], token, strlen(token)-1);
+					Map1->hostnames[mapSize][strlen(token)-1] = '\0';
+				}
+			}
+		mapSize++;
+		}
+		Map1->len = mapSize;
+	}
+
+//	print_something();
+
 	if (!interface) {
 		interface = pcap_lookupdev(errbuf);
 		if (!interface) {
@@ -101,6 +171,8 @@ out:
 
 	if (set)
 		pcap_freecode(&fp);
+
+	free(Map1);
 
 	pcap_close(handle);
 	
