@@ -1,0 +1,83 @@
+NAME    : Bharath Kumar Reddy Vangoor
+SBU ID  : 110168461
+HOME WORK 3 (2 Extra Days Used)
+
+Submission contains following files :
+1. key.txt 	: File containg the Hexa decimal string used as a key for encryption and decryption.
+2. Makefile 	: File containing the rules to compile and generate the pbproxy
+3. pbproxy.c	: File containg the Actual code
+
+Instructions to run :
+
+1. Compile :
+	[bvangoor@dhcp217 HomeWork3]$ make
+	gcc pbproxy.c -o pbproxy -lm -lcrypto -lssl
+
+2. How to run :
+	[bvangoor@dhcp217 HomeWork3]$ ./pbproxy -h
+	./pbproxy [-l port] -k keyfile dest_IP dest_port
+	-l  Listen on port (in case of server, eg : 22 etc)
+	-k  Symmetric key contained in <keyfile> (as hexa decimal string)
+	dest_IP  Destination IP address to connect
+	dest_port  Destination Port to connect
+
+3. Run (Examples) :
+	a) A simple login (correct key file) :
+	Server :
+		[bvangoor@dhcp232 HomeWork3]$ ./pbproxy -k key.txt -l 2222 localhost 22
+		Server Established connection with dhcp217.fsl.cs.sunysb.edu (130.245.126.217)
+		Server Closed connection with dhcp217.fsl.cs.sunysb.edu (130.245.126.217)
+	Client :
+		[bvangoor@dhcp217 HomeWork3]$ ssh -o "ProxyCommand ./pbproxy -k key.txt 130.245.126.232 2222" localhost
+		bvangoor@localhost's password: 
+		Last login: Sun Apr 10 22:48:17 2016 from localhost
+		[bvangoor@dhcp232 ~]$ ls
+		bench-scripts  example-workloads  filebench-code  fuse-3.0         fuse-tutorial-2014-06-12  init_script  KumarUserCode  linux-stable-fuse  myexample         rootDir  unuseful
+		config         EXT4FS             fsbench         fuse-playground  go_filebench              kbdb         libfuse_TEST   mountDir           Network_Security  test     useful
+		[bvangoor@dhcp232 ~]$ exitConnection to localhost closed.
+
+	b) A simple login (But incorrect Key file) :
+	Server :
+		[bvangoor@dhcp232 HomeWork3]$ ./pbproxy -k key.txt -l 2222 localhost 22
+		Key MisMatch
+		Server Closed connection with dhcp217.fsl.cs.sunysb.edu (130.245.126.217)
+	Client :
+		[bvangoor@dhcp217 HomeWork3]$ ssh -o "ProxyCommand ./pbproxy -k a.txt 130.245.126.232 2222" localhost
+		ssh_exchange_identification: Connection closed by remote host
+
+Explaination :
+
+1. Parsing the command line arguments using "getopt" to take listen port, key file, destination IP and destination port.
+
+2. Verfying the arguments provided, parses the hexa decimal key. If listen port is passed then code jumps to server part otherwise executes client part.
+
+Server :
+
+	1. Creates the parent socket.
+	2. Initialises the socket structure with "INADDR_ANY" and user passed listen port.
+	3. Bind the socket to the servers address.
+	4. Start listening for the client connections (MAX connections queue set to 5)
+	5. Accept the client connections. As soon as I connect with client, I read the key that is sent by the client to verify whether we share the same symmetric key, If same Server proceeds with connection otherwise Server terminates the connection.
+	6. After successful connection with client, server creates a socket to connect with local sshd.
+	7. Build the sshd address from the destination IP and destination port passed by the user.
+	8. Create the connection to the ssh server.
+	9. Once the connection is established, server reads the data from the client socket and decrypts it and passes it to the sshd socket. 
+	10. Server reads the response from the ssh socket and encrypts it and passes it to the client socket.
+	11. Step 9, 10 are done in infinite loop until the connection is terminated (which I'm checking when client sends 0 bytes)
+	
+Client :
+	1. Create a socket used for connecting to server.
+	2. Build the servers address from the destination IP and destination port passed by the user.
+	3. create the connection to the server.
+	4. As soon as the connection is established, send the encryption key to the server.
+	5. Once the connection is established, client reads the data from STDIN and encrypts the data and sends it to the server over the socket.
+	6. Client reads the data from the socket and decrypts it and sends to the STDOUT.
+	7. Steps 5,6 are done in infinite loop until the connection is terminated or any error occurs.
+
+Encryption :
+	1. I'm using 'AES_ctr128_encrypt' to encrypt and decrypt the data over the network from openssl library.
+	2. I'm using random IV for every packet that I send and this is appended to the start of the packet, which is used while decryption.
+
+Limitations :
+	1. I'm using usleep() after writting data over the socket to avoid multiple packets get combined error.
+	2. No concurrent connections are possible, but sequential connections work perfectly.
