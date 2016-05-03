@@ -7,6 +7,12 @@
 #include <stdbool.h>
 #include <getopt.h>
 #include <errno.h>
+#include <arpa/inet.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <netinet/in.h>
+#include <net/if.h>
 
 struct map {
         char hostnames[100][100];
@@ -37,13 +43,15 @@ int search_hostname(unsigned char *args, char *str) {
 
         Map1 = (struct map*)args;
         len = Map1->len;
+	if (len == 0)
+		return 0;
         for (j = 0; j < len; j++) {
                 if (strcmp(Map1->hostnames[j], str) == 0) {
-                        printf("Found IP : %s\n", Map1->ip_addrs[j]);
+//                        printf("Found IP : %s\n", Map1->ip_addrs[j]);
                         return j;
                 }
         }
-        printf("No IP Found\n");
+//        printf("No IP Found\n");
 	return -1;
 }
 
@@ -59,7 +67,7 @@ int main(int argc, char **argv) {
         bpf_u_int32 net;                /* The IP of our sniffing device */
         bool set = false;
 	struct map *Map1;
-	FILE * fp;
+	FILE *filePtr;
 	char *line = NULL, *str1 = NULL, *token = NULL;
 	char *saveptr1;
 	size_t len = 0;
@@ -101,12 +109,12 @@ out:
 	printf("expr : %s\n", expr);
 
 	if (file) {
-		fp = fopen(file, "r");
-		if (fp == NULL) {
+		filePtr = fopen(file, "r");
+		if (filePtr == NULL) {
                 	perror("open error");
                 	return -1;
         	}
-		while ((read = getline(&line, &len, fp)) != -1) {
+		while ((read = getline(&line, &len, filePtr)) != -1) {
 			for (j = 1, str1 = line; ; j++, str1 = NULL) {
 				token = strtok_r(str1, "\t", &saveptr1);
 				if (token == NULL)
@@ -119,12 +127,39 @@ out:
 					Map1->hostnames[mapSize][strlen(token)-1] = '\0';
 				}
 			}
-		mapSize++;
+			mapSize++;
 		}
 		Map1->len = mapSize;
+		fclose(filePtr);
+	} else {
+		mapSize = 0;
+		Map1->len = mapSize;
+		int fd;
+		struct ifreq ifr;
+
+		fd = socket(AF_INET, SOCK_DGRAM, 0);
+
+		/* I want to get an IPv4 IP address */
+		ifr.ifr_addr.sa_family = AF_INET;
+
+		/* I want IP address attached to "eth0" */
+		strncpy(ifr.ifr_name, "ens33", IFNAMSIZ-1);
+
+		ioctl(fd, SIOCGIFADDR, &ifr);
+
+		close(fd);
+
+		/* display result */
+		token = inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr);
+		strncpy(Map1->ip_addrs[mapSize], token, strlen(token));
+		Map1->ip_addrs[mapSize][strlen(token)] = '\0';
 	}
 
-//	print_something();
+//	print_something((unsigned char*)Map1);
+	index = search_hostname((unsigned char*)Map1, "www.fsl.com");
+	if (index != -1) {
+		printf("IP : %s\n", Map1->ip_addrs[index]);
+	}
 
 	if (!interface) {
 		interface = pcap_lookupdev(errbuf);
