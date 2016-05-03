@@ -14,6 +14,38 @@
 #include <netinet/in.h>
 #include <net/if.h>
 
+/* ethernet headers are always exactly 14 bytes [1] */
+#define SIZE_ETHERNET 14
+
+/* IP header */
+struct sniff_ip {
+        u_char  ip_vhl;                 /* version << 4 | header length >> 2 */
+        u_char  ip_tos;                 /* type of service */
+        u_short ip_len;                 /* total length */
+        u_short ip_id;                  /* identification */
+        u_short ip_off;                 /* fragment offset field */
+        #define IP_RF 0x8000            /* reserved fragment flag */
+        #define IP_DF 0x4000            /* dont fragment flag */
+        #define IP_MF 0x2000            /* more fragments flag */
+        #define IP_OFFMASK 0x1fff       /* mask for fragmenting bits */
+        u_char  ip_ttl;                 /* time to live */
+        u_char  ip_p;                   /* protocol */
+        u_short ip_sum;                 /* checksum */
+        struct  in_addr ip_src,ip_dst;  /* source and dest address */
+};
+#define IP_HL(ip)               (((ip)->ip_vhl) & 0x0f)
+#define IP_V(ip)                (((ip)->ip_vhl) >> 4)
+
+struct sniff_udp {
+         u_short uh_sport;               /* source port */
+         u_short uh_dport;               /* destination port */
+         u_short uh_ulen;                /* udp length */
+         u_short uh_sum;                 /* udp checksum */
+
+};
+
+#define SIZE_UDP        8               /* length of UDP header */
+
 struct map {
         char hostnames[100][100];
         char ip_addrs[100][100];
@@ -54,6 +86,55 @@ int search_hostname(unsigned char *args, char *str) {
 //        printf("No IP Found\n");
 	return -1;
 }
+
+/*
+ *  * dissect/print packet
+ *   */
+void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
+{
+	const struct sniff_ip *ip;              /* The IP header */
+	const struct sniff_udp *udp;		/* The UDP header*/
+	int size_ip;
+	bool frthr_analysis = false;
+
+	ip = (struct sniff_ip*)(packet + SIZE_ETHERNET);
+	size_ip = IP_HL(ip)*4;
+
+	if (size_ip < 20) {
+		printf("   * Invalid IP header length: %u bytes\n", size_ip);
+		return;
+	}
+	
+	switch(ip->ip_p) {
+		case IPPROTO_TCP:
+			frthr_analysis = false;
+			break;
+		case IPPROTO_UDP:
+			frthr_analysis = true;
+			break;
+		case IPPROTO_ICMP:
+			frthr_analysis = false;
+			break;
+		case IPPROTO_IP:
+			return;
+		default:
+			return;
+	}
+
+	if (frthr_analysis) {
+		/* print source and destination IP addresses */
+		printf("       From: %s\n", inet_ntoa(ip->ip_src));
+		printf("         To: %s\n", inet_ntoa(ip->ip_dst));
+	
+		/* define/compute udp header offset */
+                udp = (struct sniff_udp*)(packet + SIZE_ETHERNET + size_ip);
+
+                printf("   Src port: %d\n", ntohs(udp->uh_sport));
+                printf("   Dst port: %d\n", ntohs(udp->uh_dport));		
+	}
+	
+}
+
 
 int main(int argc, char **argv) {
 	int c, index;
@@ -202,7 +283,7 @@ out:
                 }
         }
 
-		
+	pcap_loop(handle, 1000, got_packet, (u_char *)Map1);
 
 	if (set)
 		pcap_freecode(&fp);
