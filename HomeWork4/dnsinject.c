@@ -522,6 +522,14 @@ out:
 //	printf("file : %s\n", file);
 //	printf("expr : %s\n", expr);
 
+	if (!interface) {
+		interface = pcap_lookupdev(errbuf);
+		if (!interface) {
+                	fprintf(stderr, "Couldn't find default device : %s\n", errbuf);
+                        return (2);
+                }
+	}
+
 	if (file) {
 		filePtr = fopen(file, "r");
 		if (filePtr == NULL) {
@@ -557,7 +565,7 @@ out:
 		ifr.ifr_addr.sa_family = AF_INET;
 
 		/* I want IP address attached to "eth0" */
-		strncpy(ifr.ifr_name, "ens33", IFNAMSIZ-1);
+		strncpy(ifr.ifr_name, interface, IFNAMSIZ-1);
 
 		ioctl(fd, SIOCGIFADDR, &ifr);
 
@@ -575,13 +583,6 @@ out:
 //		printf("IP : %s\n", Map1->ip_addrs[index]);
 //	}
 
-	if (!interface) {
-		interface = pcap_lookupdev(errbuf);
-		if (!interface) {
-                	fprintf(stderr, "Couldn't find default device : %s\n", errbuf);
-                        return (2);
-                }
-	}
 
 	handle = pcap_open_live(interface, BUFSIZ, 1, -1, errbuf);
 	if (!handle) {
