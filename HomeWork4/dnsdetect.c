@@ -253,6 +253,7 @@ unsigned char* ReadName(const unsigned char* reader, int* count)
 
 
 void print_usage(void) {
+
         printf("./dnsdetect [-i interface] [-r file] expression\n");
         printf("-i  Listen on network device <interface> (e.g., eth0).\n");
         printf("-r  Read packets from <file> (eg. ex.pcap) (tcpdump format).\n");
@@ -361,17 +362,17 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 				printf("%s DNS poisoning attempt\n", buf);
 				printf("TXID 0x%x Request %s\n", dns->id, qname);
 				printf("Answer1 [");
-				count1 = resp_node->anscount;
+				count1 = resp_node1->anscount;
 				while (ind < count1) {
-					printf("%s, ", resp_node->answers[ind]);
+					printf("%s, ", resp_node1->answers[ind]);
 					ind++;
 				}
 				printf("]\n");
 				printf("Answer2 [");
-				count1 = resp_node1->anscount;
+				count1 = resp_node->anscount;
 				ind = 0;
 				while (ind < count1) {
-					printf("%s, ", resp_node1->answers[ind]);
+					printf("%s, ", resp_node->answers[ind]);
 					ind++;
 				}
 				printf("]\n\n");	
