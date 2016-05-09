@@ -178,14 +178,14 @@ struct node* lookup(struct node *temp) {
 			bool complex_stuff = false;
 	
 			query_same = compare_queries(temp1->question, temp->question);
-	
+		
 			checksum_zero = compare_checksum(temp1->uh_sum, temp->uh_sum);
 
 //			ans_different = compare_answers(temp1->answers, temp1->ans_count, 
 //							temp->answers, temp->ans_count);
 	
 			time_diff = compare_times(&(temp->tv), &(temp1->tv));	/*First arg is later time*/
-		
+
 			if (ans_different) {
 				if (checksum_zero)
 					complex_stuff = true;
@@ -207,6 +207,7 @@ struct node *Allocate_node() {
         struct node *temp;
 
         temp = (struct node*)malloc(sizeof(struct node));
+	memset(temp->question, 0, 100);
         temp->next = NULL;
         return temp;
 }
@@ -252,6 +253,7 @@ unsigned char* ReadName(const unsigned char* reader, int* count)
 
 
 void print_usage(void) {
+
         printf("./dnsdetect [-i interface] [-r file] expression\n");
         printf("-i  Listen on network device <interface> (e.g., eth0).\n");
         printf("-r  Read packets from <file> (eg. ex.pcap) (tcpdump format).\n");
@@ -272,7 +274,10 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 	int i, j, index;
         struct RES_RECORD *response;
 	struct node *resp_node, *resp_node1;
-	struct timeval packet_tv;
+	struct timeval packet_tv, tv;
+	time_t nowtime;
+	struct tm *nowtm;
+        char tmbuf[64], buf[64];
 
 	packet_tv = header->ts;
 	ip = (struct sniff_ip*)(packet + SIZE_ETHERNET);
@@ -346,22 +351,31 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 			resp_node1 = lookup(resp_node);
 			if (resp_node1) {
 				int count1 = 0, ind = 0;
+				memset(tmbuf, 0, 64);
+				memset(buf, 0, 64);
+				tv = header->ts;
+				nowtime = tv.tv_sec;
+				nowtm = localtime(&nowtime);
+				strftime(tmbuf, sizeof tmbuf, "%Y-%m-%d %H:%M:%S", nowtm);
+				snprintf(buf, sizeof buf, "%s.%06ld", tmbuf, tv.tv_usec);
+
+				printf("%s DNS poisoning attempt\n", buf);
 				printf("TXID 0x%x Request %s\n", dns->id, qname);
 				printf("Answer1 [");
-				count1 = resp_node->anscount;
-				while (ind < count1) {
-					printf("%s, ", resp_node->answers[ind]);
-					ind++;
-				}
-				printf("]\n");
-				printf("Answer2 [");
 				count1 = resp_node1->anscount;
-				ind = 0;
 				while (ind < count1) {
 					printf("%s, ", resp_node1->answers[ind]);
 					ind++;
 				}
-				printf("]\n");	
+				printf("]\n");
+				printf("Answer2 [");
+				count1 = resp_node->anscount;
+				ind = 0;
+				while (ind < count1) {
+					printf("%s, ", resp_node->answers[ind]);
+					ind++;
+				}
+				printf("]\n\n");	
 			}
 			insert_to_list(resp_node);
 			free(qname);
