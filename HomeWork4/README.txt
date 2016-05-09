@@ -113,4 +113,43 @@ Instructions to run :
 Explaination :
 
 1. Setup :
-	a) Used VMWARE   
+	a) Used VMware Fusion to create two VM's (Attacker and Victim), both have Ubuntu installed in it.
+	
+2. DnsInject :
+	a) Parsing the command line arguments using "getopt" to take interface, filename, expression.
+
+	b) Depending on the user arguments passed, we call "pcap_open_live", but even before that if no interface is passed we choose a default one using "pcap_lookupdev". I'm using promiscuous mode. If any spoof filename is passed then I parse those IP's and hostnames and store them in a Map.
+
+	c) If user passes any BPF expression filter then we compile it using "pcap_compile" and set the filer to handle using "pcap_setfilter"
+
+	d) Then we call "pcap_loop" which takes a call back function "got_packet" which is called whenever there is new packet that gets captured. I used maximum count of "1000" number of packets to be captured when this is reached "dnsinject" will exit, Also passing the Map that created in step b which is checked against the payload query hostname and corresponsing IP is sent back.
+
+	e) Under "got_packet", I parse the IP header and check whether it is UDP or not, After that I parse UDP header and I only care about packets with destination port as 53.
+
+	f) After that, I parse the DNS Header and then query from the QUESTION section. I check against my map if is ther any IP that I need to spoof. If I don't find anything I ignore the packet. If I find then I create a response packet.
+
+	g) Constructing the Response, I copy the IP header from the incoming packet but swap the source and destination addresses. Then I copy the UDP header from incoing packet but swap the source and destination ports, also updating the checksum to 0. Then I copy the DNS Header and change the response flag and answer count to 1. Then I blindly copy the Query section without any changes. I add response structure with the IP I want to spoof and append to the response packet.
+
+	h) Then I create the RAW socket and send the packet using "sendto()" function.
+
+3. DnsDetect :
+	a) Parsing the command line arguments using "getopt" to take interface, filename, expression
+
+	b) Depending on the user arguments provided, if it is a filename then we call "pcap_open_offline" to create the pcap handle or if it is interface then we call "pcap_open_live", but even before that if no interface is passed we choose a default one using "pcap_lookupdev". I'm using promiscuous mode.
+
+	c) If user passes any BPF expression filter then we compile it using "pcap_compile" and set the filer to handle using "pcap_setfilter"
+	
+	d) Then we call "pcap_loop" which takes a call back function "got_packet" which is called whenever there is new packet that gets captured. I used maximum count of "1000" number of packets to be captured when this is reached "dnsdetect" will exit
+
+	e) Under "got_packet", I parse the IP header and check whether it is UDP or not, After that I parse UDP header and I only care about packets with source port as 53.
+
+	f) After that, I parse DNS Header and then query string from the Question section. After I parse the response answers from the Response section. I will store transaction ID, query, time, udp checksum, answers inside my node structure and check against my previous parsed packets. And I insert every node into the list.
+
+	g) These are the conditions I'm checking to raise DNS poisoning :
+		i) Transaction ID is same
+		ii) Query is same
+		iii) Answers are different
+		iv) one of the packets UDP checksum is 0.
+
+References:
+1. A simple implementation of DNS query : http://www.binarytides.com/dns-query-code-in-c-with-linux-sockets/
