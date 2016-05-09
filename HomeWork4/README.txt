@@ -150,6 +150,7 @@ Explaination :
 		ii) Query is same
 		iii) Answers are different
 		iv) one of the packets UDP checksum is 0.
+		v) Finally, Check the packet timings are in the window of 1 sec (1000 msec)
 
 References:
 1. A simple implementation of DNS query : http://www.binarytides.com/dns-query-code-in-c-with-linux-sockets/
