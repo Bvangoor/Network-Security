@@ -336,6 +336,7 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 //					printf("Ans : %s\n", inet_ntoa(source));
 					strcpy(resp_node->answers[resp_node->anscount], inet_ntoa(source));
 					resp_node->anscount = (resp_node->anscount) + 1;
+//					printf("Ans count in the node : %d\n", resp_node->anscount);
 					offset = offset + sizeof(struct RES_RECORD);
 				} else {
 					offset = offset + 12 + ntohs(response->data_len);
@@ -344,20 +345,21 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 			}
 			resp_node1 = lookup(resp_node);
 			if (resp_node1) {
-				int count1 = 0;
+				int count1 = 0, ind = 0;
 				printf("TXID 0x%x Request %s\n", dns->id, qname);
 				printf("Answer1 [");
 				count1 = resp_node->anscount;
-				while (count1 > 0) {
-					printf("%s, ", resp_node->answers[count1]);
-					count1--;
+				while (ind < count1) {
+					printf("%s, ", resp_node->answers[ind]);
+					ind++;
 				}
 				printf("]\n");
 				printf("Answer2 [");
 				count1 = resp_node1->anscount;
-				while (count1 > 0) {
-					printf("%s, ", resp_node1->answers[count1]);
-					count1--;
+				ind = 0;
+				while (ind < count1) {
+					printf("%s, ", resp_node1->answers[ind]);
+					ind++;
 				}
 				printf("]\n");	
 			}
